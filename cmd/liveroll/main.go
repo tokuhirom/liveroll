@@ -24,11 +24,12 @@ var (
 	pullCmdStr      string
 	idCmdStr        string
 	execCmdStr      string
-	intervalStr     string
+	interval        time.Duration
 	healthcheckPath string
 	listenPort      int
 	childPort1      int
 	childPort2      int
+	healthTimeout   time.Duration
 )
 
 // Global state
@@ -61,25 +62,21 @@ func main() {
 	flag.StringVar(&pullCmdStr, "pull", "", "Command to pull the new artifact")
 	flag.StringVar(&idCmdStr, "id", "", "Command to output the version or ID of the pulled artifact (printed to STDOUT)")
 	flag.StringVar(&execCmdStr, "exec", "", "Command to launch the child process (supports template variables)")
-	flag.StringVar(&intervalStr, "interval", "10s", "Interval between update checks")
+	flag.DurationVar(&interval, "interval", 60*time.Second, "Interval between update checks")
 	flag.StringVar(&healthcheckPath, "healthcheck", "/heathz", "Path for the healthcheck endpoint")
 	flag.IntVar(&listenPort, "port", 8080, "Port on which the reverse proxy listens")
 	flag.IntVar(&childPort1, "child-port1", 9101, "Child process listen port 1")
 	flag.IntVar(&childPort2, "child-port2", 9102, "Child process listen port 2")
+	flag.DurationVar(&healthTimeout, "health-timeout", 30*time.Second, "Healthcheck timeout")
 	flag.Parse()
 
 	if pullCmdStr == "" || idCmdStr == "" || execCmdStr == "" {
 		log.Fatal("Required flags --pull, --id, and --exec must be specified")
 	}
 
-	interval, err := time.ParseDuration(intervalStr)
-	if err != nil {
-		log.Fatalf("Failed to parse interval: %v", err)
-	}
-
 	// Initialize the oxy round-robin proxy
 	fwd := forward.New(false)
-	lb, err = roundrobin.New(fwd)
+	lb, err := roundrobin.New(fwd)
 	if err != nil {
 		log.Fatalf("Failed to create roundrobin proxy: %v", err)
 	}
