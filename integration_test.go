@@ -23,7 +23,7 @@ func TestIntegration_Plackup(t *testing.T) {
 	// The command is:
 	//   plackup -p <<PORT>> -e 'my $t=time(); sub { [200, [], [qq{ok $t}]] }'
 	// To pass this command as a Go string, escape the $ characters.
-	execCmd := "plackup -p <<PORT>> -e 'my \\$t=time(); sub { [200, [], [qq{ok \\$t}]] }'"
+	execCmd := "plackup -p <<PORT>> -e 'sub { [200, [], [qq{ok}]] }'"
 
 	// Prepare liveroll command-line arguments.
 	args := []string{
