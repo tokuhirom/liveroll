@@ -314,9 +314,8 @@ func startChildProcess(port int, newID string) (*ChildProcess, error) {
 
 // waitForHealth waits until the child process's healthcheck endpoint returns HTTP 200.
 func waitForHealth(child *ChildProcess) error {
-	timeout := 60 * time.Second // TODO make configurable
 	interval := 1 * time.Second
-	deadline := time.Now().Add(timeout)
+	deadline := time.Now().Add(healthTimeout)
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(child.healthURL)
 		if err == nil {

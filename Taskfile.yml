@@ -13,3 +13,12 @@ tasks:
     sources:
       - ./cmd/liveroll/main.go
     desc: "Run the server"
+
+  test:
+    cmds:
+      - go test -v ./...
+    sources:
+      - ./cmd/liveroll/main.go
+      - ./cmd/liveroll/main_test.go
+    desc: "Run tests"
+  
