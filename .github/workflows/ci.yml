@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Install plackup
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y plack
+
+      - name: Build liveroll binary
+        run: go build -o liveroll ./cmd/liveroll
+
+      - name: Run tests
+        run: go test -v ./...
