@@ -1,32 +1,30 @@
 # liveroll
 
-liveroll は、systemd 環境下で Docker コンテナのライブローリングアップデートを実現するツールです。  
-新しいアーティファクトの取得、バージョン (ID) のチェック、子プロセスの起動、ヘルスチェック、逆プロキシへの登録などの処理を自動で行い、無停止アップデートを可能にします。  
-また、oxy v2 の buffer 機能を利用して、ネットワークエラー時のリトライ処理も実現しています。
+liveroll is a tool that enables live rolling updates of Docker containers in a systemd environment. It automatically performs tasks such as fetching new artifacts, checking versions (IDs), launching child processes, performing health checks, and registering with a reverse proxy—thus enabling zero-downtime updates. It also leverages the buffer functionality of oxy v2 to implement retry logic in the event of network errors.
 
 ---
 
-## 特徴
+## Features
 
-- **自動更新:**  
-  定期実行（`--interval`）や SIGHUP シグナル受信、子プロセスの異常終了時に更新処理を実施します。
+- **Automatic Updates:**  
+  Update processing is triggered periodically via the `--interval` flag, upon receiving a SIGHUP signal, or when a child process unexpectedly terminates.
 
-- **子プロセス管理:**  
-  最大 2 つの子プロセス（`--child-port1` と `--child-port2`）を管理し、利用可能なポートに新規プロセスを起動します。  
-  古い子プロセスは明示的に終了させ、リバースプロキシからも除外されます。
+- **Child Process Management:**  
+  liveroll manages up to two child processes (specified by `--child-port1` and `--child-port2`) and launches new processes on an available port.  
+  Old child processes are explicitly terminated and removed from the reverse proxy.
 
-- **リバースプロキシ:**  
-  oxy v2 を用いたラウンドロビン方式のリバースプロキシにより、正常な子プロセスへリクエストを振り分けます。  
-  buffer 機能により、一時的なネットワークエラーにも対応可能です。
+- **Reverse Proxy:**  
+  Requests are load-balanced in a round-robin manner to healthy child processes using oxy v2 as the reverse proxy.  
+  The integrated buffer functionality also allows retrying requests when temporary network errors occur.
 
-- **柔軟な設定:**  
-  各種コマンド（`--pull`, `--id`, `--exec`）や更新間隔、ヘルスチェックのパス、タイムアウト（`--health-timeout`）などをコマンドライン引数で指定可能です。
+- **Flexible Configuration:**  
+  All commands (`--pull`, `--id`, `--exec`), update intervals, the health check path, and timeouts (via `--health-timeout`) can be specified on the command line.
 
 ---
 
-## インストール
+## Installation
 
-Go の環境が整っている場合、以下のようにビルドしてください。
+If you have a Go development environment set up, build liveroll with:
 
 ```sh
 go build -o liveroll ./cmd/liveroll
@@ -34,9 +32,9 @@ go build -o liveroll ./cmd/liveroll
 
 ---
 
-## 使い方
+## Usage
 
-### コマンドラインオプション
+### Command Line Options
 
 ```sh
 Usage of liveroll:
@@ -60,9 +58,9 @@ Usage of liveroll:
         Port for child process 2 (default 9102).
 ```
 
-### 起動例
+### Example
 
-以下は、具体的な起動例です。
+Here is a concrete example of launching liveroll:
 
 ```sh
 liveroll --interval 10s --port 8080 --child-port1=9101 --child-port2=9102 \
@@ -72,129 +70,130 @@ liveroll --interval 10s --port 8080 --child-port1=9101 --child-port2=9102 \
     --health-timeout 30s
 ```
 
-> **注意:**  
-> コマンド内のテンプレート変数 `<<PORT>>` および `<<HEALTHCHECK>>` は、実行前に実際の値に展開されます。
+> **Note:**  
+> The template variables `<<PORT>>` and `<<HEALTHCHECK>>` within the command are expanded to actual values before execution.
 
 ---
 
-## 動作の仕組み
+## How It Works
 
-liveroll の動作は大きく以下の 2 つのフェーズに分かれます。
+liveroll’s operation is divided into two major phases.
 
-### 1. 初回起動時
+### 1. Initial Startup
 
 1. **Pull:**  
-   `--pull` で指定されたコマンドを実行し、新しいアーティファクトを取得します。
+   Execute the command specified by `--pull` to fetch the new artifact.
 
-2. **ID 取得:**  
-   `--id` コマンドを実行して、取得したアーティファクトのバージョンまたは ID を得ます。
+2. **Retrieve ID:**  
+   Execute the command specified by `--id` to obtain the version or ID of the fetched artifact.
 
-3. **子プロセス起動:**  
-   `--exec` コマンド（テンプレート変数を展開）を実行し、子プロセスを起動します。
+3. **Launch Child Process:**  
+   Run the command specified by `--exec` (after substituting template variables) to start a child process.
 
-4. **ヘルスチェック:**  
-   起動した子プロセスの healthcheck エンドポイントに対してリクエストを送り、HTTP 200 が返ってくることを確認します。  
-   成功すれば、その ID を currentID として登録します。
+4. **Health Check:**  
+   Send a request to the child process’s healthcheck endpoint and confirm that an HTTP 200 response is received.  
+   If successful, register that ID as the current ID.
 
-### 2. 更新処理
+### 2. Update Process
 
-更新処理は、以下のいずれかのタイミングで実施されます。
+The update process is triggered under one of the following conditions:
 
-- `--interval` で指定された時間が経過した場合
-- liveroll が **SIGHUP** を受信した場合（強制更新）
-- 子プロセスが予期せず終了した場合
+- The time specified by `--interval` has elapsed.
+- liveroll receives a **SIGHUP** signal (force update).
+- A child process terminates unexpectedly.
 
-#### 更新処理のフロー
+#### Update Process Flow
 
-1. **Pull と ID 取得:**  
-   再度 `--pull` と `--id` コマンドを実行します。  
-   ※ 強制更新でない場合、新しい ID が現在の currentID と同一なら処理を中断します。
+1. **Pull and Retrieve ID:**  
+   Execute the `--pull` and `--id` commands again.  
+   *Note:* If this is not a forced update and the new ID matches the current ID, the process is aborted.
 
-2. **新規子プロセスの起動:**  
-   利用可能なポート（child-port1 または child-port2）を選択し、`--exec` コマンドにより子プロセスを起動します。
+2. **Launch New Child Process:**  
+   Select an available port (either child-port1 or child-port2) and launch a child process using the `--exec` command.
 
-3. **ヘルスチェックと登録:**  
-   子プロセスがヘルスチェックに成功した場合、oxy v2 のリバースプロキシのバックエンドとして登録し、currentID を更新します。
+3. **Health Check and Registration:**  
+   If the new child process passes the health check, register it as a backend with the oxy v2 reverse proxy and update the current ID.
 
-4. **古いプロセスの終了:**  
-   新しい ID と一致しない古い子プロセスは終了させ、逆プロキシから除外します。
+4. **Terminate Old Processes:**  
+   Any old child processes whose IDs do not match the new ID are terminated and removed from the reverse proxy.
 
 ---
 
-### 信号処理
+### Signal Handling
 
 - **SIGHUP:**  
-  SIGHUP を受信すると、強制的に更新処理を実行します。  
-  ※ この場合、ID が同一でも新たな子プロセスを起動します。
+  Upon receiving a SIGHUP, liveroll forces an update process.  
+  *Note:* Even if the new ID is identical to the current ID, a new child process is launched.
 
 - **SIGINT/SIGTERM:**  
-  これらのシグナルを受信すると、すべての子プロセスに終了シグナルを送信し、liveroll 自体も終了します。
+  Upon receiving these signals, liveroll sends a termination signal to all child processes and then shuts itself down.
 
 ---
 
-## システム構成図
+## System Architecture Diagram
 
-以下の Mermaid 図は、liveroll の全体的な動作フローを示しています。
+The following Mermaid diagram illustrates the overall workflow of liveroll:
 
 ```mermaid
 flowchart TD
-    A[開始] --> B[--pull コマンド実行]
-    B --> C[--id コマンド実行]
-    C --> D{新しい ID か？}
-    D -- Yes --> E[--exec コマンドで子プロセス起動]
-    E --> F[Healthcheck で確認]
-    F -- 成功 --> G[Reverse Proxy に登録]
-    G --> H[CurrentID 更新]
-    D -- No --> I[更新処理終了]
-    H --> J[次回更新トリガ（interval, SIGHUP, 子プロセス終了）]
+    A[Start] --> B[Execute --pull command]
+    B --> C[Execute --id command]
+    C --> D{Is the ID new?}
+    D -- Yes --> E[Launch child process via --exec]
+    E --> F[Perform Health Check]
+    F -- Success --> G[Register with Reverse Proxy]
+    G --> H[Update CurrentID]
+    D -- No --> I[Abort update process]
+    H --> J[Wait for next trigger - interval, SIGHUP, child process exit]
     I --> J
     J --> B
 ```
 
 ---
 
-## 内部処理の詳細
+## Internal Details
 
-### テンプレート機能
+### Template Functionality
 
-`--exec` コマンド内でサポートされるテンプレート変数は以下の通りです。
+The `--exec` command supports the following template variables:
 
 - **`<<PORT>>`:**  
-  子プロセスに割り当てられたポート番号。子プロセスはこのポートでリッスンする必要があります。
+  The port number assigned to the child process. The child process must listen on this port.
 
 - **`<<HEALTHCHECK>>`:**  
-  ヘルスチェック用の URL パス。通常は `--healthcheck` で指定した値が展開されます。
+  The URL path for health checks, typically the value specified with `--healthcheck`.
 
-### ポート管理
+### Port Management
 
-- 最大 2 つの子プロセスを管理します（`--child-port1` と `--child-port2`）。
-- 新規プロセス起動時、未使用のポートを優先して利用します。  
-  両方のポートが使用中の場合、現在の currentID と一致しない古いプロセスを終了させ、新たに起動します。
+- liveroll manages up to two child processes (using `--child-port1` and `--child-port2`).
+- When launching a new process, an unused port is preferred.  
+  If both ports are in use, an old process (whose ID does not match the current ID) is terminated to free up the port.
 
-### HTTP リバースプロキシ
+### HTTP Reverse Proxy
 
-- oxy v2 を利用したラウンドロビン方式の逆プロキシにより、正常な子プロセスへリクエストを振り分けます。
-- buffer ハンドラを組み合わせ、ネットワークエラー時にリトライを行います。
+- A reverse proxy is implemented using oxy v2 in a round-robin fashion to distribute requests to healthy child processes.
+- A buffer handler is combined with the proxy to perform retries in case of network errors.
 
-### Healthcheck
+### Health Check
 
-- 子プロセス起動後、指定された `--healthcheck` パスに対して一定間隔でリクエストを送信します。
-- `--health-timeout` で指定された期間内に HTTP 200 が返ってこなければ、起動失敗として子プロセスを終了します。
-
----
-
-## 注意事項
-
-- **ポート再利用:**  
-  子プロセスは必ず `SO_REUSEADDR` を利用してください｡指定しないと起動できないことがあります｡
+- After launching a child process, liveroll periodically sends requests to the specified `--healthcheck` path.
+- If an HTTP 200 response is not received within the period specified by `--health-timeout`, the child process is considered to have failed and is terminated.
 
 ---
 
-## ライセンス
+## Notes
+
+- **Port Reuse:**  
+  Child processes must use `SO_REUSEADDR`. Failure to specify this may prevent the process from starting.
+
+---
+
+## License
 
     The MIT License (MIT)
     
-    Copyright © 2025 Tokuhiro Matsuno, http://64p.org/ <tokuhirom@gmail.com>
+    Copyright (C) 2025 Tokuhiro Matsuno
+    https://64p.org/ <tokuhirom@gmail.com>
     
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the “Software”), to deal
