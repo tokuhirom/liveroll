@@ -27,7 +27,7 @@ jobs:
       - name: Install plackup
         run: |
           sudo apt-get update
-          sudo apt-get install -y plack
+          sudo apt-get install -y libplack-perl
 
       - name: Build liveroll binary
         run: go build -o liveroll ./cmd/liveroll
