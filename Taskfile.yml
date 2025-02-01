@@ -1,0 +1,15 @@
+version: '3'
+tasks:
+  build:
+    cmds:
+      - go build -o ./liveroll ./cmd/liveroll
+    sources:
+      - ./cmd/liveroll/main.go
+    desc: "Build the server"
+
+  dev:
+    cmds:
+      - go run ./cmd/liveroll --pull "ls" --id "perl -e 'print rand'" --exec "plackup -p <<PORT>> -e 'my \$t=time(); sub { [200, [], [qq{ok \$t}]] }'"
+    sources:
+      - ./cmd/liveroll/main.go
+    desc: "Run the server"
