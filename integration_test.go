@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -21,9 +21,6 @@ func TestIntegration_Plackup(t *testing.T) {
 	idCmd := "echo testid"
 
 	// --exec command: Launch plackup with a one-line Perl script.
-	// The command is:
-	//   plackup -p <<PORT>> -e 'my $t=time(); sub { [200, [], [qq{ok $t}]] }'
-	// To pass this command as a Go string, escape the $ characters.
 	execCmd := "plackup -p <<PORT>> -e 'sub { [200, [], [qq{ok}]] }'"
 
 	// Prepare liveroll command-line arguments.
@@ -40,7 +37,8 @@ func TestIntegration_Plackup(t *testing.T) {
 
 	// Assume liveroll binary is built and available as "./liveroll".
 	cmd := exec.Command("./liveroll", args...)
-	// Instead of using asynchronous goroutines, capture stdout and stderr in buffers.
+
+	// Capture stdout and stderr into buffers for debugging.
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
@@ -50,7 +48,7 @@ func TestIntegration_Plackup(t *testing.T) {
 		t.Fatalf("Failed to start liveroll: %v\nStdout:\n%s\nStderr:\n%s", err, stdoutBuf.String(), stderrBuf.String())
 	}
 
-	// Allow time for liveroll to perform its initial update process and register the plackup test server.
+	// Wait for the initial update process to complete and for plackup to be registered.
 	time.Sleep(15 * time.Second)
 
 	// Check that the reverse proxy is serving requests.
@@ -62,7 +60,6 @@ func TestIntegration_Plackup(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected HTTP 200 from healthcheck, got %d\nStdout:\n%s\nStderr:\n%s", resp.StatusCode, stdoutBuf.String(), stderrBuf.String())
 	}
-	// Optionally, verify the response body contains the expected text (starting with "ok").
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Errorf("Failed to read response body: %v\nStdout:\n%s\nStderr:\n%s", err, stdoutBuf.String(), stderrBuf.String())
@@ -72,10 +69,9 @@ func TestIntegration_Plackup(t *testing.T) {
 		t.Errorf("Expected response body to start with 'ok', got %q\nStdout:\n%s\nStderr:\n%s", body, stdoutBuf.String(), stderrBuf.String())
 	}
 
-	// Optionally, force an update by sending a signal.
-	// Here, we simulate a SIGHUP by sending an os.Interrupt signal (adjust if needed).
-	if err := cmd.Process.Signal(os.Interrupt); err != nil {
-		t.Fatalf("Failed to send signal to liveroll: %v\nStdout:\n%s\nStderr:\n%s", err, stdoutBuf.String(), stderrBuf.String())
+	// Force an update by sending SIGHUP (instead of os.Interrupt/SIGINT).
+	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatalf("Failed to send SIGHUP to liveroll: %v\nStdout:\n%s\nStderr:\n%s", err, stdoutBuf.String(), stderrBuf.String())
 	}
 
 	// Wait for the update process to take effect.
