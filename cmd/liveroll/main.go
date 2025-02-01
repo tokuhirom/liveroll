@@ -76,7 +76,8 @@ func main() {
 
 	// Initialize the oxy round-robin proxy
 	fwd := forward.New(false)
-	lb, err := roundrobin.New(fwd)
+	var err error
+	lb, err = roundrobin.New(fwd)
 	if err != nil {
 		log.Fatalf("Failed to create roundrobin proxy: %v", err)
 	}
