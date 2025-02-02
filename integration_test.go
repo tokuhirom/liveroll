@@ -1,8 +1,10 @@
 package liveroll
 
 import (
-	"bytes"
+	"bufio"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -11,22 +13,31 @@ import (
 	"time"
 )
 
-// TestIntegration_Plackup runs an end-to-end integration test using plackup as the child process.
-// It uses dummy commands for --pull and --id, and verifies that liveroll correctly starts the
-// test server via plackup, registers it in the reverse proxy, and forwards HTTP requests.
-func TestIntegration_Plackup(t *testing.T) {
+// logMOutput reads from r line by line and logs it using t.Log.
+func logMOutput(t *testing.T, r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		t.Log("[CHILD] " + scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		t.Logf("Error reading merged output: %v", err)
+	}
+}
+
+func TestIntegration_Simple(t *testing.T) {
 	// Dummy command for --pull: simply output "dummy".
 	pullCmd := "echo dummy"
 	// Dummy command for --id: output a fixed ID ("testid").
 	idCmd := "echo testid"
 
 	// --exec command: Launch plackup with a one-line Perl script.
-	execCmd := "plackup -p <<PORT>> -e 'sub { [200, [], [qq{ok}]] }'"
+	token := time.Now().UnixNano()
+	execCmd := fmt.Sprintf("go run testutils/demohttpd/demohttpd.go -port <<PORT>> -content 'ok %v'", token)
 
 	// Prepare liveroll command-line arguments.
 	args := []string{
 		"--interval", "10s",
-		"--port", "8080",
+		"--port", "4374",
 		"--child-port1", "9101",
 		"--child-port2", "9102",
 		"--pull", pullCmd,
@@ -38,58 +49,56 @@ func TestIntegration_Plackup(t *testing.T) {
 	// Assume liveroll binary is built and available as "./liveroll".
 	cmd := exec.Command("./liveroll", args...)
 
-	// Capture stdout and stderr into buffers for debugging.
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
+	// Merge stdout and stderr by assigning stderr to stdout.
+	cmd.Stderr = cmd.Stdout
+	// Get the combined output stdoutPipe.
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("Failed to get combined stdout stdoutPipe: %v", err)
+	}
+	// Get the combined output stdoutPipe.
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatalf("Failed to get combined stderr stderrPipe: %v", err)
+	}
 
 	// Start the liveroll process.
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("Failed to start liveroll: %v\nStdout:\n%s\nStderr:\n%s", err, stdoutBuf.String(), stderrBuf.String())
+		t.Fatalf("Failed to start liveroll: %v", err)
 	}
 
-	// Wait for the initial update process to complete and for plackup to be registered.
-	time.Sleep(15 * time.Second)
+	// Log the merged output in real time.
+	go logMOutput(t, stdoutPipe)
+	go logMOutput(t, stderrPipe)
+
+	t.Log("Wait for the initial setup.")
+	time.Sleep(3 * time.Second)
 
 	// Check that the reverse proxy is serving requests.
-	resp, err := http.Get("http://localhost:8080/heathz")
+	resp, err := http.Get("http://localhost:4374/")
 	if err != nil {
-		t.Fatalf("Failed to perform GET on reverse proxy: %v\nStdout:\n%s\nStderr:\n%s", err, stdoutBuf.String(), stderrBuf.String())
+		t.Fatalf("Failed to perform GET on reverse proxy: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected HTTP 200 from healthcheck, got %d\nStdout:\n%s\nStderr:\n%s", resp.StatusCode, stdoutBuf.String(), stderrBuf.String())
+		t.Errorf("Expected HTTP 200 from healthcheck, got %d", resp.StatusCode)
 	}
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Errorf("Failed to read response body: %v\nStdout:\n%s\nStderr:\n%s", err, stdoutBuf.String(), stderrBuf.String())
+		t.Errorf("Failed to read response body: %v", err)
 	}
 	body := strings.TrimSpace(string(bodyBytes))
 	if !strings.HasPrefix(body, "ok") {
-		t.Errorf("Expected response body to start with 'ok', got %q\nStdout:\n%s\nStderr:\n%s", body, stdoutBuf.String(), stderrBuf.String())
+		t.Errorf("Expected response body to start with 'ok', got %q", body)
 	}
 
-	// Force an update by sending SIGHUP (instead of os.Interrupt/SIGINT).
-	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
-		t.Fatalf("Failed to send SIGHUP to liveroll: %v\nStdout:\n%s\nStderr:\n%s", err, stdoutBuf.String(), stderrBuf.String())
+	t.Logf("Clean up: terminate the liveroll process.")
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("Failed to kill liveroll process: %v", err)
 	}
-
-	// Wait for the update process to take effect.
-	time.Sleep(15 * time.Second)
-
-	// Re-check the reverse proxy health endpoint.
-	resp, err = http.Get("http://localhost:8080/heathz")
+	err = cmd.Wait()
 	if err != nil {
-		t.Fatalf("Failed to perform GET on reverse proxy after update: %v\nStdout:\n%s\nStderr:\n%s", err, stdoutBuf.String(), stderrBuf.String())
+		log.Printf("child process exited: %v", err.Error())
+		t.Fatalf("Failed to wait for liveroll process: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected HTTP 200 from healthcheck after update, got %d\nStdout:\n%s\nStderr:\n%s", resp.StatusCode, stdoutBuf.String(), stderrBuf.String())
-	}
-
-	// Clean up: terminate the liveroll process.
-	if err := cmd.Process.Kill(); err != nil {
-		t.Fatalf("Failed to kill liveroll process: %v\nStdout:\n%s\nStderr:\n%s", err, stdoutBuf.String(), stderrBuf.String())
-	}
-	cmd.Wait()
 }

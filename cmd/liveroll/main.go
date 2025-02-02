@@ -142,12 +142,36 @@ func main() {
 func shutdown() {
 	childrenMutex.Lock()
 	defer childrenMutex.Unlock()
+
 	for port, child := range children {
-		log.Printf("Terminating child process on port %d", port)
+		log.Printf("Terminating child process on port %d, pid=%s", port, child.id)
 		if child.cmd != nil && child.cmd.Process != nil {
-			child.cmd.Process.Signal(syscall.SIGTERM)
+			err := child.cmd.Process.Signal(syscall.SIGTERM)
+			if err != nil {
+				log.Printf("Failed to terminate child process on port %d: %v", port, err)
+			}
 		}
 	}
+
+	log.Println("Wait for all child processes to exit")
+
+	// Non-blocking wait for child processes using waitpid(-1, WNOHANG)
+	for {
+		var status syscall.WaitStatus
+		pid, err := syscall.Wait4(-1, &status, syscall.WNOHANG, nil)
+		if pid <= 0 {
+			break // No more child processes to wait for
+		}
+		if err != nil {
+			log.Printf("Error waiting for child processes: %v", err)
+			break
+		}
+		log.Printf("Child process (pid=%d) exited", pid)
+		time.Sleep(100 * time.Millisecond) // Small delay to avoid CPU overload
+	}
+
+	log.Println("Wait for all child processes to exit")
+
 	os.Exit(0)
 }
 
