@@ -9,7 +9,7 @@ tasks:
 
   dev:
     cmds:
-      - go run ./cmd/liveroll --pull "ls" --id "perl -e 'print rand'" --exec "plackup -p <<PORT>> -e 'my \$t=time(); sub { [200, [], [qq{ok \$t}]] }'"
+      - go run ./cmd/liveroll --interval=10s --pull "ls" --id "perl -e 'print rand'" --exec "plackup -p <<PORT>> -e 'my \$t=time(); sub { [200, [], [qq{ok \$t}]] }'"
     sources:
       - ./cmd/liveroll/main.go
     desc: "Run the server"
@@ -21,4 +21,3 @@ tasks:
       - ./cmd/liveroll/main.go
       - ./cmd/liveroll/main_test.go
     desc: "Run tests"
-  

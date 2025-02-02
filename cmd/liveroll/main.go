@@ -43,6 +43,9 @@ type LiveRoll struct {
 	// Backend URLs management (key: child process port)
 	backendURLs      map[int]*url.URL
 	backendURLsMutex sync.Mutex
+
+	updateChan        chan bool
+	inShutdownProcess bool
 }
 
 // ChildProcess represents a launched child process.
@@ -55,8 +58,10 @@ type ChildProcess struct {
 
 func NewLiveRoll() LiveRoll {
 	return LiveRoll{
-		children:    make(map[int]*ChildProcess),
-		backendURLs: make(map[int]*url.URL),
+		children:          make(map[int]*ChildProcess),
+		backendURLs:       make(map[int]*url.URL),
+		updateChan:        make(chan bool, 1),
+		inShutdownProcess: false,
 	}
 }
 
@@ -99,6 +104,9 @@ func (liveRoll *LiveRoll) Run() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 
+	// update process loop
+	go liveRoll.updateLoop()
+
 	// Start the reverse proxy HTTP server
 	go func() {
 		addr := fmt.Sprintf(":%d", liveRoll.listenPort)
@@ -109,13 +117,10 @@ func (liveRoll *LiveRoll) Run() {
 	}()
 
 	// On first run, always execute the update process
-	go func() {
-		if err := liveRoll.updateProcess(true); err != nil {
-			log.Printf("Initial update failed: %v", err)
-		}
-	}()
+	liveRoll.triggerUpdate(true)
 
 	// Ticker for periodic updates
+	log.Printf("Starting update loop with interval %v", liveRoll.interval)
 	ticker := time.NewTicker(liveRoll.interval)
 	defer ticker.Stop()
 
@@ -126,11 +131,7 @@ func (liveRoll *LiveRoll) Run() {
 			switch sig {
 			case syscall.SIGHUP:
 				log.Println("Received SIGHUP. Forcing restart process.")
-				go func() {
-					if err := liveRoll.updateProcess(true); err != nil {
-						log.Printf("Update triggered by SIGHUP failed: %v", err)
-					}
-				}()
+				liveRoll.triggerUpdate(true)
 			case syscall.SIGTERM, syscall.SIGINT:
 				log.Println("Received SIGTERM/SIGINT. Terminating child processes and shutting down.")
 				liveRoll.shutdown()
@@ -138,19 +139,38 @@ func (liveRoll *LiveRoll) Run() {
 			}
 		case <-ticker.C:
 			log.Println("Update interval elapsed. Checking for updates.")
-			go func() {
-				if err := liveRoll.updateProcess(false); err != nil {
-					log.Printf("Periodic update failed: %v", err)
-				}
-			}()
+			liveRoll.triggerUpdate(false)
 		}
 	}
+}
+
+// updateLoop listens for update requests and triggers the update process.
+func (liveRoll *LiveRoll) updateLoop() {
+	for forced := range liveRoll.updateChan {
+		log.Printf("Processing update request(forced=%v)\n", forced)
+		if err := liveRoll.updateProcess(forced); err != nil {
+			log.Printf("Update process failed: %v(forced=%v)", err, forced)
+		}
+	}
+}
+
+// triggerUpdate sends a signal to the update channel to trigger an update process.
+func (liveRoll *LiveRoll) triggerUpdate(forced bool) {
+	if liveRoll.inShutdownProcess {
+		log.Println("Ignoring update request during shutdown process")
+		return
+	}
+	liveRoll.updateChan <- forced
 }
 
 // shutdown sends SIGTERM to all child processes and exits the program.
 func (liveRoll *LiveRoll) shutdown() {
 	liveRoll.childrenMutex.Lock()
 	defer liveRoll.childrenMutex.Unlock()
+
+	// don't accept any more updates
+	log.Printf("Shutting down. Waiting for child processes to exit.")
+	liveRoll.inShutdownProcess = true
 
 	for port, child := range liveRoll.children {
 		log.Printf("Terminating child process on port %d, pid=%s", port, child.id)
@@ -273,6 +293,7 @@ func runCommandOutput(cmdStr string) (string, error) {
 func (liveRoll *LiveRoll) selectChildPort() int {
 	liveRoll.childrenMutex.Lock()
 	defer liveRoll.childrenMutex.Unlock()
+
 	_, exists1 := liveRoll.children[liveRoll.childPort1]
 	_, exists2 := liveRoll.children[liveRoll.childPort2]
 	if !exists1 {
@@ -281,6 +302,8 @@ func (liveRoll *LiveRoll) selectChildPort() int {
 	if !exists2 {
 		return liveRoll.childPort2
 	}
+
+	// Both ports are in use. Terminate the one that does not match the current ID.
 	liveRoll.currentIDMutex.Lock()
 	current := liveRoll.currentID
 	liveRoll.currentIDMutex.Unlock()
@@ -298,6 +321,7 @@ func (liveRoll *LiveRoll) selectChildPort() int {
 		liveRoll.removeBackendByPort(liveRoll.childPort2)
 		return liveRoll.childPort2
 	}
+
 	// If both processes are current, arbitrarily terminate the one on childPort1.
 	log.Printf("Both child processes are current. Terminating process on port %d", liveRoll.childPort1)
 	killChild(liveRoll.children[liveRoll.childPort1])
