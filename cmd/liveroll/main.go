@@ -172,34 +172,52 @@ func (liveRoll *LiveRoll) shutdown() {
 	log.Printf("Shutting down. Waiting for child processes to exit.")
 	liveRoll.inShutdownProcess = true
 
-	for port, child := range liveRoll.children {
-		log.Printf("Terminating child process on port %d, pid=%s", port, child.id)
-		if child.cmd != nil && child.cmd.Process != nil {
-			err := child.cmd.Process.Signal(syscall.SIGTERM)
-			if err != nil {
-				log.Printf("Failed to terminate child process on port %d: %v", port, err)
+	sendSignalForAllChildren := func(signal syscall.Signal) {
+		for port, child := range liveRoll.children {
+			log.Printf("Sending signal %v to child process on port %d, pid=%s", signal, port, child.id)
+			if child.cmd != nil && child.cmd.Process != nil {
+				err := child.cmd.Process.Signal(signal)
+				if err != nil {
+					log.Printf("Failed to send signal %v to child process on port %d: %v", signal, port, err)
+				}
 			}
 		}
 	}
 
-	log.Println("Wait for all child processes to exit")
+	waitAllChildren := func() bool {
+		// Non-blocking wait for child processes using waitpid(-1, WNOHANG)
+		for i := 0; i < 300; i++ {
+			log.Print("Waiting for child processes to exit")
+			var status syscall.WaitStatus
+			pid, err := syscall.Wait4(-1, &status, syscall.WNOHANG, nil)
+			if pid <= 0 {
+				// No more child processes to wait for
+				log.Println("All child processes exited")
+				return true
+			}
+			if err != nil {
+				log.Printf("Error waiting for child processes: %v", err)
+				return false
+			}
+			log.Printf("Child process (pid=%d) exited", pid)
+			time.Sleep(100 * time.Millisecond) // Small delay to avoid CPU overload
+		}
 
-	// Non-blocking wait for child processes using waitpid(-1, WNOHANG)
-	for {
-		var status syscall.WaitStatus
-		pid, err := syscall.Wait4(-1, &status, syscall.WNOHANG, nil)
-		if pid <= 0 {
-			break // No more child processes to wait for
-		}
-		if err != nil {
-			log.Printf("Error waiting for child processes: %v", err)
-			break
-		}
-		log.Printf("Child process (pid=%d) exited", pid)
-		time.Sleep(100 * time.Millisecond) // Small delay to avoid CPU overload
+		log.Printf("Timeout waiting for child processes to exit")
+		return false
 	}
 
+	log.Printf("Sending SIGTERM to all child processes")
+	sendSignalForAllChildren(syscall.SIGTERM)
+
 	log.Println("Wait for all child processes to exit")
+
+	if !waitAllChildren() {
+		log.Println("Force killing all child processes")
+		sendSignalForAllChildren(syscall.SIGKILL)
+
+		waitAllChildren()
+	}
 
 	os.Exit(0)
 }
