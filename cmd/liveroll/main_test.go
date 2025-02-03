@@ -36,9 +36,9 @@ func TestRunCommandOutput(t *testing.T) {
 // createTestLiveRoll creates a LiveRoll instance with test configuration
 func createTestLiveRoll() *LiveRoll {
 	lr := NewLiveRoll()
-	lr.childPort1 = 9101
-	lr.childPort2 = 9102
-	lr.healthTimeout = 2 * time.Second
+	lr.ChildPort1 = 9101
+	lr.ChildPort2 = 9102
+	lr.HealthTimeout = 2 * time.Second
 	return &lr
 }
 
@@ -47,19 +47,19 @@ func TestSelectChildPort_NoChild(t *testing.T) {
 	lr := createTestLiveRoll()
 
 	port := lr.selectChildPort()
-	if port != lr.childPort1 {
-		t.Errorf("Expected port %d when no child exists, got %d", lr.childPort1, port)
+	if port != lr.ChildPort1 {
+		t.Errorf("Expected port %d when no child exists, got %d", lr.ChildPort1, port)
 	}
 }
 
 // TestSelectChildPort_OneChild tests port selection when one child process exists.
 func TestSelectChildPort_OneChild(t *testing.T) {
 	lr := createTestLiveRoll()
-	lr.children[lr.childPort1] = &ChildProcess{id: "someid"}
+	lr.children[lr.ChildPort1] = &ChildProcess{id: "someid"}
 
 	port := lr.selectChildPort()
-	if port != lr.childPort2 {
-		t.Errorf("Expected port %d when one child exists, got %d", lr.childPort2, port)
+	if port != lr.ChildPort2 {
+		t.Errorf("Expected port %d when one child exists, got %d", lr.ChildPort2, port)
 	}
 }
 
@@ -72,18 +72,18 @@ func TestSelectChildPort_BothChildren_OneOld(t *testing.T) {
 	lr.currentIDMutex.Unlock()
 
 	lr.childrenMutex.Lock()
-	lr.children[lr.childPort1] = &ChildProcess{id: "old"}
-	lr.children[lr.childPort2] = &ChildProcess{id: "current"}
+	lr.children[lr.ChildPort1] = &ChildProcess{id: "old"}
+	lr.children[lr.ChildPort2] = &ChildProcess{id: "current"}
 	lr.childrenMutex.Unlock()
 
 	port := lr.selectChildPort()
-	if port != lr.childPort1 {
-		t.Errorf("Expected port %d to be selected (old process), got %d", lr.childPort1, port)
+	if port != lr.ChildPort1 {
+		t.Errorf("Expected port %d to be selected (old process), got %d", lr.ChildPort1, port)
 	}
 
 	lr.childrenMutex.Lock()
-	if _, exists := lr.children[lr.childPort1]; exists {
-		t.Errorf("Expected child on port %d to be removed", lr.childPort1)
+	if _, exists := lr.children[lr.ChildPort1]; exists {
+		t.Errorf("Expected child on port %d to be removed", lr.ChildPort1)
 	}
 	lr.childrenMutex.Unlock()
 }
@@ -97,18 +97,18 @@ func TestSelectChildPort_BothChildren_Current(t *testing.T) {
 	lr.currentIDMutex.Unlock()
 
 	lr.childrenMutex.Lock()
-	lr.children[lr.childPort1] = &ChildProcess{id: "current"}
-	lr.children[lr.childPort2] = &ChildProcess{id: "current"}
+	lr.children[lr.ChildPort1] = &ChildProcess{id: "current"}
+	lr.children[lr.ChildPort2] = &ChildProcess{id: "current"}
 	lr.childrenMutex.Unlock()
 
 	port := lr.selectChildPort()
-	if port != lr.childPort1 {
-		t.Errorf("Expected port %d to be selected, got %d", lr.childPort1, port)
+	if port != lr.ChildPort1 {
+		t.Errorf("Expected port %d to be selected, got %d", lr.ChildPort1, port)
 	}
 
 	lr.childrenMutex.Lock()
-	if _, exists := lr.children[lr.childPort1]; exists {
-		t.Errorf("Expected child on port %d to be removed", lr.childPort1)
+	if _, exists := lr.children[lr.ChildPort1]; exists {
+		t.Errorf("Expected child on port %d to be removed", lr.ChildPort1)
 	}
 	lr.childrenMutex.Unlock()
 }

@@ -21,15 +21,15 @@ import (
 )
 
 type LiveRoll struct {
-	pullCmdStr      string
-	idCmdStr        string
-	execCmdStr      string
-	interval        time.Duration
-	healthcheckPath string
-	listenPort      int
-	childPort1      int
-	childPort2      int
-	healthTimeout   time.Duration
+	PullCmdStr      string
+	IdCmdStr        string
+	ExecCmdStr      string
+	Interval        time.Duration
+	HealthcheckPath string
+	ListenPort      int
+	ChildPort1      int
+	ChildPort2      int
+	HealthTimeout   time.Duration
 
 	// current image ID (output from the --id command)
 	currentID      string
@@ -54,7 +54,7 @@ type ChildProcess struct {
 	port      int
 	id        string // output from the --id command
 	cmd       *exec.Cmd
-	healthURL string // e.g., "http://localhost:<port><healthcheckPath>"
+	healthURL string // e.g., "http://localhost:<port><HealthcheckPath>"
 }
 
 func NewLiveRoll() LiveRoll {
@@ -70,18 +70,18 @@ func main() {
 	liveRoll := NewLiveRoll()
 
 	// Define flags
-	flag.StringVar(&liveRoll.pullCmdStr, "pull", "", "Command to pull the new artifact")
-	flag.StringVar(&liveRoll.idCmdStr, "id", "", "Command to output the version or ID of the pulled artifact (printed to STDOUT)")
-	flag.StringVar(&liveRoll.execCmdStr, "exec", "", "Command to launch the child process (supports template variables)")
-	flag.DurationVar(&liveRoll.interval, "interval", 60*time.Second, "Interval between update checks")
-	flag.StringVar(&liveRoll.healthcheckPath, "healthcheck", "/heathz", "Path for the healthcheck endpoint")
-	flag.IntVar(&liveRoll.listenPort, "port", 8080, "Port on which the reverse proxy listens")
-	flag.IntVar(&liveRoll.childPort1, "child-port1", 9101, "Child process listen port 1")
-	flag.IntVar(&liveRoll.childPort2, "child-port2", 9102, "Child process listen port 2")
-	flag.DurationVar(&liveRoll.healthTimeout, "health-timeout", 30*time.Second, "Healthcheck timeout")
+	flag.StringVar(&liveRoll.PullCmdStr, "pull", "", "Command to pull the new artifact")
+	flag.StringVar(&liveRoll.IdCmdStr, "id", "", "Command to output the version or ID of the pulled artifact (printed to STDOUT)")
+	flag.StringVar(&liveRoll.ExecCmdStr, "exec", "", "Command to launch the child process (supports template variables)")
+	flag.DurationVar(&liveRoll.Interval, "Interval", 60*time.Second, "Interval between update checks")
+	flag.StringVar(&liveRoll.HealthcheckPath, "healthcheck", "/heathz", "Path for the healthcheck endpoint")
+	flag.IntVar(&liveRoll.ListenPort, "port", 8080, "Port on which the reverse proxy listens")
+	flag.IntVar(&liveRoll.ChildPort1, "child-port1", 9101, "Child process listen port 1")
+	flag.IntVar(&liveRoll.ChildPort2, "child-port2", 9102, "Child process listen port 2")
+	flag.DurationVar(&liveRoll.HealthTimeout, "health-timeout", 30*time.Second, "Healthcheck timeout")
 	flag.Parse()
 
-	if liveRoll.pullCmdStr == "" || liveRoll.idCmdStr == "" || liveRoll.execCmdStr == "" {
+	if liveRoll.PullCmdStr == "" || liveRoll.IdCmdStr == "" || liveRoll.ExecCmdStr == "" {
 		log.Fatal("Required flags --pull, --id, and --exec must be specified")
 	}
 
@@ -110,7 +110,7 @@ func (liveRoll *LiveRoll) Run() {
 
 	// Start the reverse proxy HTTP server
 	go func() {
-		addr := fmt.Sprintf(":%d", liveRoll.listenPort)
+		addr := fmt.Sprintf(":%d", liveRoll.ListenPort)
 		log.Printf("Starting reverse proxy on %s", addr)
 		if err := http.ListenAndServe(addr, bufferHandler); err != nil {
 			log.Fatalf("Reverse proxy server terminated: %v", err)
@@ -121,8 +121,8 @@ func (liveRoll *LiveRoll) Run() {
 	liveRoll.triggerUpdate(true)
 
 	// Ticker for periodic updates
-	log.Printf("Starting update loop with interval %v", liveRoll.interval)
-	ticker := time.NewTicker(liveRoll.interval)
+	log.Printf("Starting update loop with Interval %v", liveRoll.Interval)
+	ticker := time.NewTicker(liveRoll.Interval)
 	defer ticker.Stop()
 
 	// Main loop: handle signals and periodic update events
@@ -139,7 +139,7 @@ func (liveRoll *LiveRoll) Run() {
 				return
 			}
 		case <-ticker.C:
-			log.Println("Update interval elapsed. Checking for updates.")
+			log.Println("Update Interval elapsed. Checking for updates.")
 			liveRoll.triggerUpdate(false)
 		}
 	}
@@ -228,13 +228,13 @@ func (liveRoll *LiveRoll) shutdown() {
 func (liveRoll *LiveRoll) updateProcess(forced bool) error {
 	log.Println("Starting update process")
 	// 1. Execute the pull command
-	if err := runCommand(liveRoll.pullCmdStr); err != nil {
+	if err := runCommand(liveRoll.PullCmdStr); err != nil {
 		return fmt.Errorf("pull command failed: %v", err)
 	}
 	log.Println("Pull command executed successfully")
 
 	// 2. Execute the id command to obtain the new ID
-	newID, err := runCommandOutput(liveRoll.idCmdStr)
+	newID, err := runCommandOutput(liveRoll.IdCmdStr)
 	if err != nil {
 		return fmt.Errorf("id command failed: %v", err)
 	}
@@ -313,47 +313,47 @@ func (liveRoll *LiveRoll) selectChildPort() int {
 	liveRoll.childrenMutex.Lock()
 	defer liveRoll.childrenMutex.Unlock()
 
-	_, exists1 := liveRoll.children[liveRoll.childPort1]
-	_, exists2 := liveRoll.children[liveRoll.childPort2]
+	_, exists1 := liveRoll.children[liveRoll.ChildPort1]
+	_, exists2 := liveRoll.children[liveRoll.ChildPort2]
 	if !exists1 {
-		return liveRoll.childPort1
+		return liveRoll.ChildPort1
 	}
 	if !exists2 {
-		return liveRoll.childPort2
+		return liveRoll.ChildPort2
 	}
 
 	// Both ports are in use. Terminate the one that does not match the current ID.
 	liveRoll.currentIDMutex.Lock()
 	current := liveRoll.currentID
 	liveRoll.currentIDMutex.Unlock()
-	if liveRoll.children[liveRoll.childPort1].id != current {
-		log.Printf("Both ports in use. Terminating process on port %d", liveRoll.childPort1)
-		killChild(liveRoll.children[liveRoll.childPort1])
-		delete(liveRoll.children, liveRoll.childPort1)
-		liveRoll.removeBackendByPort(liveRoll.childPort1)
-		return liveRoll.childPort1
+	if liveRoll.children[liveRoll.ChildPort1].id != current {
+		log.Printf("Both ports in use. Terminating process on port %d", liveRoll.ChildPort1)
+		killChild(liveRoll.children[liveRoll.ChildPort1])
+		delete(liveRoll.children, liveRoll.ChildPort1)
+		liveRoll.removeBackendByPort(liveRoll.ChildPort1)
+		return liveRoll.ChildPort1
 	}
-	if liveRoll.children[liveRoll.childPort2].id != current {
-		log.Printf("Both ports in use. Terminating process on port %d", liveRoll.childPort2)
-		killChild(liveRoll.children[liveRoll.childPort2])
-		delete(liveRoll.children, liveRoll.childPort2)
-		liveRoll.removeBackendByPort(liveRoll.childPort2)
-		return liveRoll.childPort2
+	if liveRoll.children[liveRoll.ChildPort2].id != current {
+		log.Printf("Both ports in use. Terminating process on port %d", liveRoll.ChildPort2)
+		killChild(liveRoll.children[liveRoll.ChildPort2])
+		delete(liveRoll.children, liveRoll.ChildPort2)
+		liveRoll.removeBackendByPort(liveRoll.ChildPort2)
+		return liveRoll.ChildPort2
 	}
 
-	// If both processes are current, arbitrarily terminate the one on childPort1.
-	log.Printf("Both child processes are current. Terminating process on port %d", liveRoll.childPort1)
-	killChild(liveRoll.children[liveRoll.childPort1])
-	delete(liveRoll.children, liveRoll.childPort1)
-	liveRoll.removeBackendByPort(liveRoll.childPort1)
-	return liveRoll.childPort1
+	// If both processes are current, arbitrarily terminate the one on ChildPort1.
+	log.Printf("Both child processes are current. Terminating process on port %d", liveRoll.ChildPort1)
+	killChild(liveRoll.children[liveRoll.ChildPort1])
+	delete(liveRoll.children, liveRoll.ChildPort1)
+	liveRoll.removeBackendByPort(liveRoll.ChildPort1)
+	return liveRoll.ChildPort1
 }
 
 // startChildProcess performs template substitution on the exec command and launches the child process.
 func (liveRoll *LiveRoll) startChildProcess(port int, newID string) (*ChildProcess, error) {
-	// Replace template variables <<PORT>> and <<HEALTHCHECK>> in execCmdStr.
-	cmdStr := strings.ReplaceAll(liveRoll.execCmdStr, "<<PORT>>", fmt.Sprintf("%d", port))
-	cmdStr = strings.ReplaceAll(cmdStr, "<<HEALTHCHECK>>", liveRoll.healthcheckPath)
+	// Replace template variables <<PORT>> and <<HEALTHCHECK>> in ExecCmdStr.
+	cmdStr := strings.ReplaceAll(liveRoll.ExecCmdStr, "<<PORT>>", fmt.Sprintf("%d", port))
+	cmdStr = strings.ReplaceAll(cmdStr, "<<HEALTHCHECK>>", liveRoll.HealthcheckPath)
 	log.Printf("Child process launch command: %s", cmdStr)
 	cmd := exec.Command("sh", "-c", cmdStr)
 	cmd.Stdout = os.Stdout
@@ -363,7 +363,7 @@ func (liveRoll *LiveRoll) startChildProcess(port int, newID string) (*ChildProce
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	healthURL := fmt.Sprintf("http://localhost:%d%s", port, liveRoll.healthcheckPath)
+	healthURL := fmt.Sprintf("http://localhost:%d%s", port, liveRoll.HealthcheckPath)
 	child := &ChildProcess{
 		port:      port,
 		id:        newID,
@@ -415,7 +415,7 @@ func (liveRoll *LiveRoll) startChildProcess(port int, newID string) (*ChildProce
 // waitForHealth waits until the child process's healthcheck endpoint returns HTTP 200.
 func (liveRoll *LiveRoll) waitForHealth(child *ChildProcess) error {
 	interval := 1 * time.Second
-	deadline := time.Now().Add(liveRoll.healthTimeout)
+	deadline := time.Now().Add(liveRoll.HealthTimeout)
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(child.healthURL)
 		if err == nil {
