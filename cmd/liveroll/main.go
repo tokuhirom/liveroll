@@ -401,6 +401,12 @@ func (liveRoll *LiveRoll) startChildProcess(port int, newID string) (*ChildProce
 		delete(liveRoll.children, port)
 		liveRoll.childrenMutex.Unlock()
 		liveRoll.removeBackend(ch)
+
+		// If there's no child process running, trigger an update process.
+		if len(liveRoll.children) == 0 {
+			log.Println("No child processes running. Triggering update process.")
+			liveRoll.triggerUpdate(true)
+		}
 	}(child)
 
 	return child, nil
