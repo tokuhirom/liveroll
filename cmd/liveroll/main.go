@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/vulcand/oxy/v2/buffer"
@@ -373,11 +374,28 @@ func (liveRoll *LiveRoll) startChildProcess(port int, newID string) (*ChildProce
 	// Start a goroutine to monitor the child process termination.
 	go func(ch *ChildProcess) {
 		err := cmd.Wait()
+
 		if err != nil {
-			log.Printf("Child process on port %d terminated abnormally: %v", port, err)
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+					if status.Signaled() {
+						// シグナルによる終了
+						log.Printf("Child process on port %d terminated by signal %v", port, status.Signal())
+						// SIGTERMによる終了は正常なグレースフル・シャットダウン
+						if status.Signal() == syscall.SIGTERM {
+							log.Printf("Process gracefully shut down by SIGTERM")
+						}
+					} else {
+						// 非ゼロの終了コードによる終了
+						log.Printf("Child process on port %d exited with code %d", port, status.ExitStatus())
+					}
+				}
+			}
 		} else {
-			log.Printf("Child process on port %d terminated normally", port)
+			log.Printf("Child process on port %d terminated normally (exit code 0)", port)
 		}
+
 		// On termination, remove the child from global management and the reverse proxy.
 		liveRoll.childrenMutex.Lock()
 		delete(liveRoll.children, port)
@@ -422,12 +440,33 @@ func (liveRoll *LiveRoll) removeStaleChildren(newID string, newPort int) {
 	defer liveRoll.childrenMutex.Unlock()
 	for port, child := range liveRoll.children {
 		if port != newPort && child.id != newID {
-			log.Printf("Terminating old child process on port %d", port)
-			killChild(child)
+			log.Printf("Sending SIGTERM to the old child process on port %d, pid=%v", port, child.cmd.Process.Pid)
+
+			// send SIGTERM to the child process
+			err := child.cmd.Process.Signal(syscall.SIGTERM)
+			if err != nil {
+				log.Printf("Failed to send SIGTERM to child process on port %d, pid %v: %v",
+					port, child.cmd.Process.Pid, err)
+			}
+
+			if !waitProcessExit(child.cmd, 10*time.Millisecond, 1000) {
+				killChild(child)
+			}
+
 			delete(liveRoll.children, port)
 			liveRoll.removeBackend(child)
 		}
 	}
+}
+
+func waitProcessExit(cmd *exec.Cmd, sleepTime time.Duration, retryCount int) bool {
+	for i := 0; i < retryCount; i++ {
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			return true
+		}
+		time.Sleep(sleepTime)
+	}
+	return false
 }
 
 // addBackend adds the child process's address to the reverse proxy.
